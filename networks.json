@@ -1,7 +1,10 @@
 [{
-  "Cumbres del Volcan": "hostal2023"
+  "ssid": "Cumbres del Volcan",
+  "password": "hostal2023"
 }, {
-  "Cumbres del Volcan 1": "hostal2023"
+  "ssid": "Cumbres del Volcan 1",
+  "password": "hostal2023"
 }, {
-  "Cumbres del Volcan 2": "hostal2023"
+  "ssid": "Cumbres del Volcan 2",
+  "password": "hostal2023"
 }]
