@@ -286,7 +286,11 @@ def gui():
     update_table()
     # Run the application
     root.mainloop()
-    scan_thread.join()
+
+    # Prevents killing a non living thread
+    if checking:
+        stop_scan()
+        scan_thread.join()
 
 
 __all__ = [gui, networks]
