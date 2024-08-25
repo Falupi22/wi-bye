@@ -2,25 +2,39 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import json
 import os
-from idlelib.tooltip import Hovertip
-from network import scan
+from network import scan, stop_scan
 from threading import Thread
 
-scan_interval = 10000
+from src.entries import set_entry
+
+NETWORKS_FILE = '../networks.json'
+ICONS = {
+    'hide': '../assets/hide_icon.png',
+    'show': '../assets/show_icon.png',
+    'current_on': '../assets/current_on.png',
+    'current_off': '../assets/current_off.png',
+    'edit': '../assets/check.png',
+    'add': '../assets/add.png',
+    'remove': '../assets/remove.png'
+}
 
 
 # Load network details from JSON file
 def load_networks(filename):
     if not os.path.isfile(filename):
+        set_entry('networks', [])
         return []
     with open(filename, 'r') as file:
-        return json.load(file)
+        value = json.load(file)
+        set_entry('networks', value)
+        return value
 
 
 # Save network details to JSON file
 def save_networks(filename, networks):
     with open(filename, 'w') as file:
         json.dump(networks, file, indent=4)
+        set_entry('networks', networks)
 
 
 # Update the table view
@@ -33,12 +47,12 @@ def update_table():
 
 def on_enter(event):
     """Change the border color when the mouse enters the button."""
-    event.widget.config(highlightbackground='blue', highlightcolor='blue', relief="sunken", borderwidth=1)
+    event.widget.config(background='lightGray', highlightcolor='blue', relief="sunken")
 
 
 def on_leave(event):
     """Revert the border color when the mouse leaves the button."""
-    event.widget.config(highlightbackground='lightGray', highlightcolor='lightGray', relief="groove", borderwidth=0)
+    event.widget.config(background='SystemButtonFace', highlightcolor='lightGray', relief="groove", borderwidth=0)
 
 
 def apply_hover_effects(root):
@@ -68,8 +82,6 @@ def toggle_password():
 
 def on_table_select(event):
     global last_selected_item
-    print(last_selected_item, " previous")
-    print(table.selection(), " selected")
     selected_item = table.selection()
 
     if len(selected_item) == 0:
@@ -115,7 +127,7 @@ def confirm_changes():
         messagebox.showwarning("Network Not Found", "SSID not found in the list.")
         return
 
-    save_networks('../networks.json', networks)
+    save_networks(NETWORKS_FILE, networks)
     update_table()
     messagebox.showinfo("Success", "Changes have been saved.")
 
@@ -133,9 +145,8 @@ def remove_entry():
                 if network.get("ssid") == ssid:
                     item = network
             if item:
-
                 networks.remove(item)
-    save_networks('../networks.json', networks)
+    save_networks(NETWORKS_FILE, networks)
     update_table()
     messagebox.showinfo("Success", "Changes have been saved.")
 
@@ -154,34 +165,42 @@ def add_entry():
             return
 
     networks.append({"ssid": ssid, "password": password})
-    save_networks('../networks.json', networks)
+    save_networks(NETWORKS_FILE, networks)
     update_table()
     messagebox.showinfo("Success", "Changes have been saved.")
 
 
-def toggle_checking(thread: Thread):
+def toggle_checking():
     global checking
+    global scan_thread
+
     checking = not checking
     if checking:
         check_button.config(image=current_on)
         scanning_label.config(text="Scanning")
-        start_scanning(thread)
+        start_scanning(scan_thread)
     else:
         scanning_label.config(text="Not scanning")
         check_button.config(image=current_off)
+        stop_scan()
+        scan_thread = Thread(target=scan, daemon=True)
 
 
 def start_scanning(thread: Thread):
     """Start scanning for networks periodically."""
-    if checking:
-        thread.start()
+    thread.start()
+
+
+def on_closing():
+    stop_scan()
+    root.destroy()
 
 
 # Initialize variables
 password_visible = False
 checking = False
-networks = load_networks('../networks.json')
-scan_thread: Thread = Thread(target=scan)
+networks = load_networks(NETWORKS_FILE)
+scan_thread: Thread = Thread(target=scan, daemon=True)
 
 # Create the main window
 root = tk.Tk()
@@ -189,18 +208,19 @@ root.geometry("350x420")
 root.resizable(False, False)
 root.title("WiBye")
 root.iconbitmap("../assets/app_icon.ico")
+root.protocol("WM_DELETE_WINDOW", on_closing)
 
 # Create style Object
 buttonStyle = {"relief": "groove", "borderwidth": 0,
                "highlightthickness": 0}
 
-hide_icon = tk.PhotoImage(file="../assets/hide_icon.png")
-show_icon = tk.PhotoImage(file="../assets/show_icon.png")
-current_on = tk.PhotoImage(file="../assets/current_on.png")
-current_off = tk.PhotoImage(file="../assets/current_off.png")
-edit = tk.PhotoImage(file="../assets/check.png")
-add = tk.PhotoImage(file="../assets/add.png")
-remove = tk.PhotoImage(file="../assets/remove.png")
+hide_icon = tk.PhotoImage(file=ICONS['hide'])
+show_icon = tk.PhotoImage(file=ICONS['show'])
+current_on = tk.PhotoImage(file=ICONS['current_on'])
+current_off = tk.PhotoImage(file=ICONS['current_off'])
+edit = tk.PhotoImage(file=ICONS['edit'])
+add = tk.PhotoImage(file=ICONS['add'])
+remove = tk.PhotoImage(file=ICONS['remove'])
 
 # Header
 header_frame = tk.Frame(root)
@@ -209,7 +229,7 @@ header_label = tk.Label(header_frame, text="WiBye", font=('Arial', 16, 'bold'))
 header_label.pack(side=tk.LEFT)
 
 # Toggle button
-check_button = tk.Button(header_frame, image=current_off, command=lambda: toggle_checking(scan_thread))
+check_button = tk.Button(header_frame, image=current_off, command=toggle_checking)
 check_button.pack(side=tk.RIGHT)
 
 scanning_label = tk.Label(header_frame, text="Not scanning", padx=10,
@@ -243,20 +263,19 @@ password_entry.grid(row=1, column=1, pady=5, padx=5)
 # Expose/Hide Password Button
 expose_button = tk.Button(entry_frame, image=show_icon, command=toggle_password)
 expose_button.grid(row=1, column=2, padx=5, pady=5, sticky=tk.EW)
-Hovertip(expose_button, 'Click to show' if not password_visible else 'Click to hide')
 
 hstack = tk.Frame(root, height=24)
 hstack.pack(expand=True)
 
 # Confirm Button
-confirm_button = tk.Button(hstack, image=edit, font="Arial", foreground="white", text="Confirm",
+confirm_button = tk.Button(hstack, image=edit,
                            command=confirm_changes)
 
 # Remove Button
-remove_button = tk.Button(hstack, image=remove, font="Arial", foreground="white", text="Confirm", command=remove_entry)
+remove_button = tk.Button(hstack, image=remove, command=remove_entry)
 
 # Add Button
-add_button = tk.Button(hstack, image=add, font="Arial", foreground="white", command=add_entry)
+add_button = tk.Button(hstack, image=add, command=add_entry)
 add_button.pack(pady=10)
 
 apply_hover_effects(root)
@@ -265,9 +284,9 @@ apply_hover_effects(root)
 def gui():
     # Populate the table
     update_table()
-
     # Run the application
     root.mainloop()
+    scan_thread.join()
 
 
-__all__ = [gui]
+__all__ = [gui, networks]

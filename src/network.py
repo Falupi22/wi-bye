@@ -1,7 +1,30 @@
 import subprocess
 import time
 import json
+import os
+import socket
 from plyer import notification
+
+from src.entries import get_entry
+
+SCAN_INTERVAL = 10
+CONNECTION_INTERVAL = 5
+
+scanning = False
+
+
+def add_quotes(string, quote_type='"'):
+    """
+    Encloses the given string in quotes.
+
+    Parameters:
+    string (str): The string to be enclosed in quotes.
+    quote_type (str): The type of quote to use, either single (') or double ("). Defaults to double quotes.
+
+    Returns:
+    str: The string enclosed in the specified quotes.
+    """
+    return f"{quote_type}{string}{quote_type}"
 
 
 # Load network details from JSON file
@@ -14,9 +37,9 @@ def get_available_networks():
     """Retrieve a list of available Wi-Fi networks and their details."""
     try:
         # Use netsh to list available networks with BSSID details
-        result = subprocess.run(["netsh", "wlan", "show", "network", "mode=Bssid"], capture_output=True, text=True)
+        result = os.popen("netsh wlan show network mode=Bssid").read()
         networks = []
-        lines = result.stdout.split('\n')
+        lines = result.split('\n')
         current_network = {}
         for line in lines:
             if "SSID" in line and not "BSSID" in line:
@@ -30,7 +53,7 @@ def get_available_networks():
         if current_network:
             networks.append(current_network)
         return networks
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"Failed to retrieve available networks: {e}")
         return []
 
@@ -38,20 +61,31 @@ def get_available_networks():
 def create_profile_xml(ssid, password, authentication, encryption):
     """Create an XML profile for the Wi-Fi network."""
     # Adjust XML based on network authentication and encryption details
-    profile_xml = f"""<?xml version="1.0"?>
-<WiFiProfile>
-    <name>{ssid}</name>
+    profile_xml = """<?xml version=\"1.0\"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+    <name>""" + ssid + """</name>
     <SSIDConfig>
         <SSID>
-            <name>{ssid}</name>
+            <name>""" + ssid + """</name>
         </SSID>
     </SSIDConfig>
     <connectionType>ESS</connectionType>
     <connectionMode>auto</connectionMode>
-    <authentication>{authentication}</authentication>
-    <encryption>{encryption}</encryption>
-    <keyMaterial>{password}</keyMaterial>
-</WiFiProfile>"""
+    <MSM>
+        <security>
+            <authEncryption>
+                <authentication>WPA2PSK</authentication>
+                <encryption>AES</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+            <sharedKey>
+                <keyType>passPhrase</keyType>
+                <protected>false</protected>
+                <keyMaterial>""" + password + """</keyMaterial>
+            </sharedKey>
+        </security>
+    </MSM>
+</WLANProfile>"""
     return profile_xml
 
 
@@ -62,41 +96,35 @@ def connect_to_network(ssid, password, authentication, encryption):
         profile_file = f"{profile_name}.xml"
         profile_xml = create_profile_xml(ssid, password, authentication, encryption)
 
-        with open(profile_file, 'w') as file:
-            file.write(profile_xml)
+        relative_path = "..\\" + profile_file
+        with open(relative_path, 'w') as file:
+            file.write("..\\" + profile_xml)
 
-        # Add the Wi-Fi profile
-        subprocess.run(["netsh", "wlan", "add", "profile", f"filename={profile_file}"], check=True)
+        os.system("netsh wlan add profile filename=" + add_quotes(relative_path))
 
-        # Connect to the Wi-Fi network
-        subprocess.run(["netsh", "wlan", "connect", "name=" + profile_name], check=True)
-        print(f"Attempting to connect to {ssid}...")
+        os.system("netsh wlan connect name=" + add_quotes(ssid) +
+                  " ssid=" + add_quotes(ssid))
 
-        # Notify the user of the connection attempt
-        notification.notify(
-            title="Wi-Fi Connection Attempt",
-            message=f"Attempting to connect to {ssid}...",
-            timeout=10
-        )
+        os.system("del " + add_quotes(relative_path))
 
-        # Clean up profile file
-        subprocess.run(["del", profile_file], shell=True)
-
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"Failed to connect to {ssid}: {e}")
 
 
-def is_connected():
+def is_connected(attempts=3, timeout=3):
     """Check if the system is connected to the internet by pinging multiple times."""
-    try:
-        for _ in range(3):
-            result = subprocess.run(["ping", "-n", "1", "8.8.8.8"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if result.returncode == 0:
-                return True
-            time.sleep(1)  # Wait 1 second between pings
-        return False
-    except subprocess.CalledProcessError:
-        return False
+    for attempt in range(attempts):
+        try:
+            # Try to connect to the host
+            socket.setdefaulttimeout(timeout)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect(("8.8.8.8", 53))
+            return True
+        except socket.error as ex:
+            print(f"Attempt {attempt + 1} failed: {ex}")
+            # Wait before retrying
+            time.sleep(1)
+    return False
 
 
 def notify_connection_status(status, ssid=None):
@@ -105,53 +133,55 @@ def notify_connection_status(status, ssid=None):
         notification.notify(
             title="Wi-Fi Connected",
             message=f"Successfully connected to {ssid}!",
-            timeout=10
+            timeout=3
         )
     elif status == "disconnected":
         notification.notify(
             title="Wi-Fi Disconnected",
             message="Lost internet connection.",
-            timeout=10
+            timeout=3
         )
 
 
 def scan():
-    networks = load_networks('../networks.json')
+    global scanning
+    networks = get_entry("networks")
     connected = False
 
-    while True:
+    scanning = True
+    while scanning:
         available_networks = get_available_networks()
         if not is_connected():
             if connected:
                 notify_connection_status("disconnected")
                 connected = False
 
-            print("No internet connection detected.")
             connection_successful = False
 
             for network in networks:
                 # Find the network details from available networks
                 network_details = next((n for n in available_networks if n['ssid'] == network['ssid']), None)
                 if network_details:
-                    print(f"Trying to connect to {network['ssid']}...")
                     connect_to_network(network['ssid'], network['password'], network_details['authentication'],
                                        network_details['encryption'])
-                    time.sleep(10)  # Wait for a short period to allow the connection attempt to settle
+                    time.sleep(CONNECTION_INTERVAL)  # Wait for a short period to allow the connection attempt to settle
 
                     if is_connected():
-                        print(f"Successfully connected to {network['ssid']}!")
                         notify_connection_status("connected", ssid=network['ssid'])
                         connected = True
                         connection_successful = True
                         break
 
             if not connection_successful:
-                print("All available networks failed. Retrying in 10 seconds.")
-                time.sleep(10)  # Wait 10 seconds before retrying
+                time.sleep(SCAN_INTERVAL)  # Wait 10 seconds before retrying
         else:
             if not connected:
                 notify_connection_status("connected",
                                          ssid="Current Network")  # Optionally, replace with actual network name
                 connected = True
-            print("Connected to the internet.")
-            time.sleep(10)  # Check every 10 seconds
+            time.sleep(SCAN_INTERVAL)  # Check every 10 seconds
+
+
+def stop_scan():
+    global scanning
+    scanning = False
