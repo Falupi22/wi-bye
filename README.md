@@ -30,5 +30,5 @@ Python 3.12+
 
 ## Logo
 
-![Logo](./assets/screenshot.png)
+![Logo](./assets/wi_bye.png)
 
