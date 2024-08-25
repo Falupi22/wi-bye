@@ -116,7 +116,7 @@ def notify_connection_status(status, ssid=None):
 
 
 def scan():
-    networks = load_networks('networks.json')
+    networks = load_networks('../networks.json')
     connected = False
 
     while True:
