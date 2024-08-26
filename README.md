@@ -17,8 +17,8 @@ Python 3.12+
 
 # Installation
 1. Clone the repo.
-2. pip install.
-3. Run the app.
+2. Run ``pip install -r requirements.txt``
+4. Run the app.
 
 
 
