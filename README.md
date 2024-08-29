@@ -17,9 +17,10 @@ Python 3.12+
 
 # Installation
 1. Clone the repo.
-2. Run ``pip install -r requirements.txt``
-4. Run the app.
-
+2. ``python -m venv venv``
+3. Run venv\Scripts\activate.bat file.
+4. ``pip install -r requirements.txt``
+5. ``python src/main.py``
 
 
 ## Screenshots
